@@ -1,202 +1,245 @@
-# NEXUS — Account / Handover Notes
+# NEXUS — Written Account 
 
-## Project
+## Scope
 
-NEXUS — Reliable Work Orchestration & Operator Control Plane
+NEXUS is a local Reliable Work Orchestration & Operator Control Plane.
 
-NEXUS is a local reliability platform designed to demonstrate durable work state, bounded retries, worker recovery, operator diagnosis, release rollback, cache freshness, honest degradation, order certainty, and deterministic failure injection.
+The platform was built to demonstrate reliability behaviours that can be observed and tested rather than only described. The implementation covers durable work state, bounded retries, dead-lettering, idempotency, worker supervision and recovery, operator actions, release rollback, cache freshness, consistency disagreements, honest degradation, order certainty, platform beliefs, and deterministic failure injection.
 
-The project is implemented as a local Python application using SQLite for durable state and Streamlit for the operator dashboard.
+The main platform is under `nexus/`. The operator layer is under `nexus/operator/`. Durable SQLite state is managed under `nexus/storage/`. Worker execution is under `nexus/workers/`. Executable requirement tests are under `tests/`.
 
----
-
-## Repository
-
-The project root is:
-
-```text
-nexus-suhani/
-```
-
-Main areas:
-
-```text
-nexus/
-    core/       Reliability and state-management logic
-    operator/   Operator controls, queries, beliefs, and dashboard
-    services/   Supporting services
-    storage/    SQLite database and schema
-    workers/    Worker execution
-
-tests/          Executable requirement tests
-scripts/        Startup, reset, seed, demo, and stop utilities
-```
-
-The main operator dashboard is:
+The Streamlit application at:
 
 ```text
 nexus/operator/dashboard.py
 ```
 
-The durable database is:
+is the main operator-facing view.
+
+The platform deliberately remains local and understandable. It uses SQLite as its durable state store and does not claim to be a production-scale distributed orchestration system.
+
+The implemented reliability requirements are:
 
 ```text
-data/nexus.db
+R-01  Accepted work is safe.
+R-02  Every piece of work ends somewhere.
+R-03  Doing it twice is harmless.
+R-04  Trying again has a limit.
+R-05  You can ask about the past.
+R-06  Changes can be undone.
+R-07  Changes are linked to what followed.
+R-08  Disagreements are found.
+R-09  Copied values carry their age.
+R-10  Degrading is honest.
+R-11  Recovery does no harm.
+R-12  A guess within ninety seconds.
+R-13  Order is only claimed when known.
+R-14  The platform can be asked about itself.
+R-15  Failures can be triggered.
 ```
 
-The database is local runtime state and should not be committed to Git.
+The repository contains executable tests for these behaviours and an operator dashboard for observing the resulting durable state.
 
----
+## Decisions
 
-## Environment
+The system uses durable SQLite records rather than keeping the authoritative work state only in process memory. Work items, attempts, deduplication state, releases, and structured events are persisted so that the operator can inspect what happened after processing or failure.
 
-The project was developed locally using Python and a virtual environment.
+Work follows explicit lifecycle states. Failed work is not silently discarded. Retryable failures return work to the queue while attempts remain. When the retry budget is exhausted, work becomes `DEAD_LETTERED`.
 
-Create the environment with:
+Retry delays use bounded exponential backoff. This prevents an immediate retry storm while keeping the retry behaviour deterministic enough to demonstrate.
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
+Idempotency is represented through durable deduplication records so repeated handling of the same work can be distinguished from new work.
+
+Worker processes are supervised. Unexpected exits can trigger bounded restarts with backoff. The restart budget prevents an unhealthy worker from being restarted indefinitely. When the budget is exhausted, the worker is placed `OUT_OF_SERVICE`.
+
+Operator actions are explicit rather than arbitrary state edits. The operator command layer supports starting, stopping, restarting, requeueing, and retrying dead-lettered work. These actions are recorded as structured events.
+
+Release management separates creation from activation. A newly created release is not automatically active. Activating a new release records the previously active release, allowing a rollback to restore it.
+
+Cache values retain their age. The platform can inspect an expired value, but an expired value is not served as if it were fresh.
+
+For consistency, the platform reports disagreements rather than silently choosing one value. For ordering, explicit evidence is separated from display adjacency. Missing evidence produces an unknown relationship rather than an invented order.
+
+For dependency failures, the platform uses explicit degraded behaviour. A fallback can be returned, but the response identifies that the dependency was unavailable and that the value is a fallback rather than live data.
+
+The platform also records structured events containing decisions, reasons, before/after state, and messages. This was chosen so that the operator can reconstruct the history of an item instead of relying only on its current status.
+
+## Failure behaviour
+
+Retryable application failures follow the same general lifecycle as ordinary processing failures.
+
+A deterministic test failure can be requested with:
+
+```json
+{
+  "fail_attempts": 2
+}
 ```
 
-Install the project:
+The intended sequence is:
 
-```bash
-pip install -e .
+```text
+Attempt 1 → FAILED
+Attempt 2 → FAILED
+Attempt 3 → SUCCESS
 ```
 
-The dashboard requires Streamlit:
+A permanent failure can be requested with:
 
-```bash
-pip install streamlit
+```json
+{
+  "always_fail": true
+}
 ```
 
-Initialize the database:
+The work is retried until the configured maximum number of attempts is reached. It then moves to `DEAD_LETTERED`.
 
-```bash
-python -c "from nexus.storage.database import initialize; initialize()"
+A non-retryable failure can be represented through the failure configuration so the failure becomes terminal instead of entering another retry cycle.
+
+Worker failure is handled separately from application failure. If a supervised worker process exits unexpectedly, the Supervisor observes the exit and can restart it subject to the configured restart budget and backoff. Repeated crashes consume the budget. Once the budget is exhausted, the worker becomes `OUT_OF_SERVICE`.
+
+Release failure is handled through rollback. When release B is active and has a recorded previous release A, a rollback of B restores A as the active release.
+
+For cache failures, an expired value remains inspectable but is refused for serving. The operator can therefore see the stale value without the system misrepresenting it as current.
+
+For dependency failure, NEXUS enters explicit degraded behaviour and exposes the fallback source. The fallback is not presented as live data.
+
+For consistency disagreements, NEXUS reports the disagreement rather than quietly selecting a value.
+
+For insufficient ordering evidence, NEXUS returns an unknown relationship instead of inferring order from display position.
+
+Failure injection is deliberate and deterministic. The purpose is to allow a reviewer to trigger the claimed failure paths and observe their consequences.
+
+## Limits
+
+NEXUS is a local reliability demonstration platform.
+
+SQLite is the durable state store. The design therefore does not claim the characteristics of a multi-node production database or distributed consensus system.
+
+The Streamlit dashboard is an operator demonstration interface. It is not a production authentication, authorization, or security boundary.
+
+The worker supervision and recovery tests exercise process crashes under controlled local conditions. They do not prove recovery from every possible machine, operating-system, network, storage, or infrastructure failure.
+
+The retry and restart budgets are bounded by configuration. A work item that exhausts its retry budget is dead-lettered rather than retried forever. A worker that exhausts its restart budget becomes `OUT_OF_SERVICE`.
+
+Cache freshness depends on the configured maximum age. The system intentionally refuses expired values rather than claiming that they are current.
+
+The order-certainty logic does not infer relationships that are not supported by evidence. Consequently, some sequences can remain partially ordered or unknown.
+
+The platform's evidence is limited to what it records. An operator can only diagnose events, attempts, state transitions, and decisions that are actually persisted.
+
+The executable tests demonstrate the scenarios they cover. Passing them should be understood as evidence for those scenarios, not proof of universal correctness under every failure condition.
+
+## Confidence
+
+Confidence is based primarily on executable demonstrations rather than on code inspection alone.
+
+The repository includes tests for:
+
+```text
+retries
+idempotency
+intake
+failure injection
+worker supervision
+worker recovery
+recovery rate limiting
+restart budgets
+release creation/activation/rollback
+cache freshness
+consistency disagreements
+honest degradation
+order certainty
+platform beliefs
+operator commands
+operator diagnosis
+operator queries
+operator runtime
 ```
 
----
+Representative successful demonstrations include:
 
-## Running the Project
+```text
+R-06 RELEASE ROLLBACK TEST PASSED
+R-09 CACHE FRESHNESS TEST PASSED
+R-11 RECOVERY RATE LIMIT TEST PASSED
+R-13 ORDER CERTAINTY TEST PASSED
+R-14 PLATFORM BELIEFS TEST PASSED
+RESTART BUDGET TEST PASSED
+```
+
+The cache tests demonstrated that fresh values are served while expired values are refused and remain observable.
+
+The recovery-rate test demonstrated increasing recovery delays:
+
+```text
+Restart 1: approximately 0.2s
+Restart 2: approximately 0.4s
+Restart 3: approximately 0.8s
+```
+
+The restart-budget test demonstrated that repeated crashes consume the restart budget and eventually place the worker in:
+
+```text
+OUT_OF_SERVICE
+```
+
+The release test demonstrated activation of a newer release followed by rollback to the previous active release.
+
+The order test demonstrated that explicit ordering evidence is retained while display adjacency is not treated as proof of order.
+
+The platform-beliefs test demonstrated that the platform can report information about its own durable work state, active release, and recent events.
+
+Confidence should therefore be strongest for the behaviours directly covered by these executable tests. Areas outside those scenarios remain subject to the limits described above.
+
+## Next
+
+If another six hours were available, the work should be prioritized in this order.
+
+First, perform a clean-machine handover test using only the README instructions. The goal is to confirm that a reviewer who has never seen NEXUS can install it, start it, open the dashboard, and understand the first useful screen without assistance.
+
+Second, run the complete reliability test set again from a clean database and record the final results. This gives a single final evidence pass rather than relying on individual tests run at different development stages.
+
+Third, improve the operator walkthrough so each important requirement has a short, reproducible demonstration path: what command or input triggers it, which state transition should occur, and what the reviewer should look for in the dashboard.
+
+Fourth, review the dashboard for presentation quality and make sure durable state, failures, retries, worker health, releases, and events are visible without unnecessary scrolling or confusing output.
+
+Fifth, add any remaining test coverage only where a requirement currently relies on an implementation path that is not directly exercised by an executable test.
+
+Sixth, perform a final Git hygiene check so runtime databases, virtual environments, Python cache files, and machine-specific files are not committed.
+
+The immediate goal is not to add unrelated functionality. It is to make the existing reliability behaviour easy to reproduce, observe, and evaluate.
+
+## How to run it
 
 From the repository root:
 
 ```bash
+python3 -m venv .venv
 source .venv/bin/activate
+pip install -e .
+pip install streamlit
+python -c "from nexus.storage.database import initialize; initialize()"
 ```
 
-Start NEXUS:
+Start the runtime:
 
 ```bash
 python -m scripts.start
 ```
 
-In another terminal, start the dashboard:
+In another terminal:
 
 ```bash
 source .venv/bin/activate
 streamlit run nexus/operator/dashboard.py
 ```
 
-The dashboard is the main operator-facing interface.
+Open the URL printed by Streamlit.
 
----
+The first screen to inspect is **System Health**. Then inspect **Work Queue**, **Retrying Work**, and **Recent Events**. For a particular Work ID, use **Inspect Work** to see the durable record, attempts, and event timeline.
 
-## Dashboard
-
-The dashboard currently exposes:
-
-```text
-System Health
-Work Queue
-Retrying Work
-Inspect Work
-Attempts
-Event Timeline
-Recent Failures
-Recent Events
-```
-
-System Health reports:
-
-```text
-Total Work
-Queued
-Running
-Succeeded
-Dead Lettered
-```
-
-Work can be inspected by entering its Work ID.
-
-The inspection view exposes the durable work record, attempt history, and structured event timeline.
-
-The dashboard is intended to make system behaviour understandable without requiring direct database inspection.
-
----
-
-## Reliability Requirements
-
-The project has executable tests covering the major requirements.
-
-R-01 — Accepted work is safe.
-
-R-02 — Every piece of work ends somewhere.
-
-R-03 — Doing it twice is harmless.
-
-R-04 — Trying again has a limit.
-
-R-05 — You can ask about the past.
-
-R-06 — Changes can be undone.
-
-R-07 — Changes are linked to what followed.
-
-R-08 — Disagreements are found.
-
-R-09 — Copied values carry their age.
-
-R-10 — Degrading is honest.
-
-R-11 — Recovery does no harm.
-
-R-12 — A guess within ninety seconds.
-
-R-13 — Order is only claimed when known.
-
-R-14 — The platform can be asked about itself.
-
-R-15 — Failures can be triggered.
-
----
-
-## Verified Test Areas
-
-The following behaviours have been exercised during development:
-
-```text
-Retry behaviour
-Dead-letter behaviour
-Idempotency
-Worker recovery
-Recovery rate limiting
-Restart budget
-Release activation and rollback
-Cache age tracking
-Expired cache refusal
-Honest degradation
-Consistency disagreement detection
-Order certainty / no order guessing
-Platform beliefs
-Operator commands
-Operator diagnosis
-Failure injection
-```
-
-Representative commands:
+To demonstrate the important behaviours directly, use the executable tests:
 
 ```bash
 python -m tests.test_retries
@@ -215,252 +258,30 @@ python -m tests.test_operator_diagnosis
 python -m tests.test_operator_queries
 python -m tests.test_operator_runtime
 python -m tests.test_supervisor
-```
-
-Failure injection is run with a required worker ID:
-
-```bash
 python -m tests.test_failure_injection --worker-id failure-test-worker
 ```
 
 A successful scenario prints a corresponding `TEST PASSED` message.
 
----
+## Reviewer path
 
-## Important Demonstrated Behaviours
 
-### Retry and failure
-
-A work item can be configured to fail a fixed number of attempts:
-
-```json
-{
-  "fail_attempts": 2
-}
-```
-
-Expected sequence:
+The intended reviewer path is:
 
 ```text
-Attempt 1 → FAILED
-Attempt 2 → FAILED
-Attempt 3 → SUCCESS
+Clone
+  ↓
+Create environment
+  ↓
+Install
+  ↓
+Initialize database
+  ↓
+Start NEXUS
+  ↓
+Open dashboard
+  ↓
+Run or inspect a scenario
+  ↓
+Observe durable state and events
 ```
-
-Permanent failure can be demonstrated with:
-
-```json
-{
-  "always_fail": true
-}
-```
-
-The work eventually becomes `DEAD_LETTERED` after its retry budget is exhausted.
-
-### Worker recovery
-
-Workers are supervised by the Supervisor.
-
-Repeated crashes trigger restart behaviour with backoff and a bounded restart budget.
-
-Once the restart budget is exhausted, the worker becomes:
-
-```text
-OUT_OF_SERVICE
-```
-
-### Release rollback
-
-Release management supports:
-
-```text
-create_release()
-activate_release()
-get_active_release()
-get_release()
-rollback_release()
-list_releases()
-```
-
-The R-06 test verifies that activating a newer release records the previous release and that a rollback restores that previous active release.
-
-### Cache freshness
-
-Cached values carry creation time and maximum age.
-
-Fresh values can be served.
-
-Expired values are refused.
-
-Expired values remain observable for diagnosis.
-
-### Honest degradation
-
-When a dependency is unavailable, NEXUS can use a fallback while explicitly identifying the system as degraded.
-
-The fallback must not be represented as live data.
-
-### Order certainty
-
-NEXUS distinguishes explicit ordering evidence from display adjacency.
-
-When evidence is insufficient, it reports:
-
-```text
-order_known = false
-```
-
-instead of guessing.
-
-### Platform beliefs
-
-The platform can expose information about its current durable work state, active release, and recent events.
-
-### Failure injection
-
-Failure injection provides a deterministic mechanism to demonstrate failure handling rather than relying on an accidental failure.
-
----
-
-## Data Model
-
-The primary durable state is stored in SQLite.
-
-Important records include:
-
-```text
-work_items
-attempts
-dedupe_records
-events
-releases
-```
-
-Work items contain lifecycle state, attempt information, worker information, release information, timestamps, and failure information.
-
-Attempts preserve execution history.
-
-Events preserve important decisions, reasons, state transitions, and messages.
-
-This data is what allows the operator dashboard to explain what happened.
-
----
-
-## Operator Commands
-
-The operator layer supports explicit actions including:
-
-```text
-start_worker
-stop_worker
-restart_worker
-requeue_work
-retry_dead_letter
-```
-
-Operator actions are recorded as events.
-
-This means manual intervention remains visible in the system history.
-
----
-
-## Resetting the Environment
-
-To reset local demonstration state:
-
-```bash
-python -m scripts.reset
-```
-
-Do not use the reset command if the current local demonstration state needs to be preserved.
-
----
-
-## Git / Submission Hygiene
-
-The following should remain untracked:
-
-```text
-.venv/
-__pycache__/
-*.pyc
-data/nexus.db
-data/nexus.db-wal
-data/nexus.db-shm
-.DS_Store
-.env
-```
-
-Check the repository before committing:
-
-```bash
-git status
-```
-
-The source code, tests, README, project configuration, and other required project files should be tracked.
-
----
-
-## Clean Handover Procedure
-
-For a final handover, verify the project from a clean environment.
-
-```text
-1. Create a new virtual environment.
-2. Install the project.
-3. Initialize the database.
-4. Start NEXUS.
-5. Start the dashboard.
-6. Verify the dashboard loads.
-7. Run the major reliability tests.
-8. Verify retry and dead-letter behaviour.
-9. Verify worker recovery and restart limits.
-10. Verify release rollback.
-11. Verify cache freshness.
-12. Verify honest degradation.
-13. Verify order certainty.
-14. Verify platform beliefs.
-15. Verify failure injection.
-16. Inspect work attempts and events in the dashboard.
-17. Check git status.
-18. Confirm local runtime/database files are ignored.
-```
-
----
-
-## Known Scope
-
-NEXUS is a local reliability demonstration platform.
-
-It is not intended to claim production-scale distributed orchestration, cloud-scale availability, or complete protection against every possible operating-system, hardware, network, or distributed-system failure.
-
-The executable tests demonstrate the implemented scenarios under the conditions they cover.
-
-SQLite is used as the local durable state store.
-
-The dashboard is an operator demonstration interface, not a production authentication or security boundary.
-
----
-
-## Final Handover Principle
-
-The core objective of NEXUS is observability of reliable behaviour.
-
-The system should make it possible to understand:
-
-```text
-What happened?
-Which work was affected?
-Which attempt was running?
-Why did the platform retry?
-Why was work dead-lettered?
-What worker was involved?
-What release was active?
-Was a cached value still fresh?
-Was a dependency unavailable?
-Was an ordering relationship actually known?
-What operator action occurred?
-What happened after recovery?
-```
-
-The tests provide executable evidence for the implemented reliability behaviours, while the dashboard provides an operator-facing view of the resulting durable state.
