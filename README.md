@@ -50,7 +50,7 @@ Runtime database files under `data/` are local state and are intentionally exclu
 Run these commands from the repository root.
 
 ```bash
-git clone <REPOSITORY_URL>
+git clone (https://github.com/passionfruit7/nexus-psi)
 cd nexus-suhani
 
 python3 -m venv .venv
