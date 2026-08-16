@@ -73,7 +73,7 @@ Open a second terminal:
 ```bash
 cd nexus-suhani
 source .venv/bin/activate
-streamlit run nexus/operator/dashboard.py
+PYTHONPATH=. python -m streamlit run nexus/operator/dashboard.py
 ```
 
 The Streamlit URL printed by the command is the operator view.
