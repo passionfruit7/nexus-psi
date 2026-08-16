@@ -51,7 +51,7 @@ Run these commands from the repository root.
 
 ```bash
 git clone https://github.com/passionfruit7/nexus-psi
-cd nexus-suhani
+cd nexus-psi
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -71,7 +71,7 @@ python -m nexus
 Open a second terminal:
 
 ```bash
-cd nexus-suhani
+cd nexus-psi
 source .venv/bin/activate
 PYTHONPATH=. python -m streamlit run nexus/operator/dashboard.py
 ```
