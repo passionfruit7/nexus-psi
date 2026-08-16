@@ -648,37 +648,6 @@ Source code, tests, configuration, documentation, and project metadata should re
 
 ---
 
-## Handover Checklist
-
-Before final submission:
-
-```text
-[ ] Create a clean virtual environment
-[ ] Install the project
-[ ] Initialize the database
-[ ] Start NEXUS
-[ ] Start the dashboard
-[ ] Verify the dashboard loads
-[ ] Run the reliability tests
-[ ] Verify retry behaviour
-[ ] Verify dead-letter behaviour
-[ ] Verify worker recovery
-[ ] Verify restart budget
-[ ] Verify recovery rate limiting
-[ ] Verify cache expiration
-[ ] Verify honest degradation
-[ ] Verify consistency detection
-[ ] Verify order certainty
-[ ] Verify release rollback
-[ ] Verify platform beliefs
-[ ] Verify failure injection
-[ ] Inspect attempts and events in the dashboard
-[ ] Verify no secrets are committed
-[ ] Verify local database files are ignored
-```
-
----
-
 ## Scope and Limitations
 
 NEXUS is a local reliability demonstration platform.
