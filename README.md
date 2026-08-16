@@ -11,7 +11,7 @@ The project is designed to be runnable and reviewable from a clean machine rathe
 The repository contains the NEXUS platform, executable requirement tests, local scripts, a SQLite durable state store, and a Streamlit operator dashboard.
 
 ```text
-nexus-suhani/
+nexus-psi/
 ├── nexus/
 │   ├── core/
 │   │   ├── cache_manager.py
