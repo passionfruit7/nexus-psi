@@ -50,7 +50,7 @@ Runtime database files under `data/` are local state and are intentionally exclu
 Run these commands from the repository root.
 
 ```bash
-git clone (https://github.com/passionfruit7/nexus-psi)
+git clone https://github.com/passionfruit7/nexus-psi
 cd nexus-suhani
 
 python3 -m venv .venv
@@ -65,7 +65,7 @@ python -c "from nexus.storage.database import initialize; initialize()"
 Start the NEXUS runtime:
 
 ```bash
-python -m scripts.start
+python -m nexus
 ```
 
 Open a second terminal:
@@ -81,7 +81,7 @@ The Streamlit URL printed by the command is the operator view.
 If the project dependencies are already installed, the shortest dashboard command is:
 
 ```bash
-streamlit run nexus/operator/dashboard.py
+PYTHONPATH=. python -m streamlit run nexus/operator/dashboard.py
 ```
 
 ## Four-minute reviewer walkthrough
